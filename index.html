@@ -1,0 +1,321 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=800, height=480, initial-scale=1, user-scalable=no">
+<title>Patient Monitor</title>
+<style>
+  /* ===== Theme ===== */
+  :root {
+    --bg: #0f1216;
+    --panel: #1a1f26;
+    --panel-2: #262d37;
+    --text: #e8edf2;
+    --muted: #8a96a3;
+    --ok: #3ddc97;
+    --warn: #ffb547;
+    --alarm: #ff4d5e;
+    --calib: #5cb8ff;
+    --radius: 16px;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body {
+    width: 100%; height: 100%; background: #000; color: var(--text);
+    font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    overflow: hidden; -webkit-user-select: none; user-select: none;
+    -webkit-tap-highlight-color: transparent; touch-action: manipulation; cursor: default;
+  }
+  body { display: flex; align-items: center; justify-content: center; }
+
+  /* Always exactly the screen size: 800 x 480 */
+  #app {
+    width: 800px; height: 480px; background: var(--bg); flex-shrink: 0;
+    display: grid; grid-template-rows: 52px 1fr; transform-origin: center;
+    position: relative;
+  }
+  #app::after {               /* red flashing frame during an alarm */
+    content: ""; position: absolute; inset: 0; pointer-events: none;
+    border: 6px solid var(--alarm); opacity: 0;
+  }
+  #app.alarm::after { animation: flash 1s infinite; }
+  @keyframes flash { 50% { opacity: 1; } }
+
+  /* ----- Header ----- */
+  header {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 0 18px; border-bottom: 1px solid var(--panel-2);
+  }
+  #title { font-size: 19px; font-weight: 600; }
+  .status { display: flex; align-items: center; gap: 16px; color: var(--muted); font-size: 15px; }
+  .dot { width: 9px; height: 9px; border-radius: 50%; background: var(--muted); display: inline-block; margin-right: 6px; }
+  .dot.on { background: var(--ok); }
+  #clock { color: var(--text); font-size: 21px; font-weight: 600; font-variant-numeric: tabular-nums; }
+
+  /* ----- Layout: camera left, cards right ----- */
+  main { display: grid; grid-template-columns: 1fr 262px; gap: 12px; padding: 12px; min-height: 0; }
+  .side { display: grid; grid-template-rows: 1fr 1fr; gap: 12px; min-height: 0; }
+
+  /* ----- Camera ----- */
+  .camera { position: relative; background: #000; border-radius: var(--radius); overflow: hidden; }
+  #cam { width: 100%; height: 100%; object-fit: contain; display: block; }
+  #camOff {
+    position: absolute; inset: 0; display: flex; flex-direction: column; gap: 8px;
+    align-items: center; justify-content: center; color: var(--muted); font-size: 16px; text-align: center;
+  }
+  #camOff svg { width: 44px; height: 44px; opacity: .6; }
+  #banner {
+    position: absolute; left: 12px; right: 12px; bottom: 12px; padding: 12px 16px;
+    border-radius: 12px; background: var(--alarm); color: #fff; font-size: 22px; font-weight: 700;
+    display: none; align-items: center; gap: 10px;
+  }
+  #banner.show { display: flex; }
+
+  /* ----- Cards ----- */
+  .card {
+    background: var(--panel); border-radius: var(--radius); padding: 14px 16px;
+    display: flex; flex-direction: column; min-height: 0; border: 2px solid transparent;
+    transition: border-color .2s;
+  }
+  .card-head { display: flex; justify-content: space-between; align-items: center; }
+  .label { color: var(--muted); font-size: 13px; font-weight: 600; letter-spacing: .8px; text-transform: uppercase; }
+  .chip { font-size: 12px; padding: 3px 9px; border-radius: 10px; background: var(--panel-2); color: var(--muted); }
+  .chip.on { color: var(--ok); }
+
+  /* fatigue */
+  #fatigueText { font-size: 30px; font-weight: 700; margin: 8px 0 auto; line-height: 1.1; }
+  .bar-row { display: flex; justify-content: space-between; font-size: 14px; color: var(--muted); margin-bottom: 6px; }
+  .bar-row b { color: var(--text); font-variant-numeric: tabular-nums; }
+  .bar { height: 10px; border-radius: 5px; background: var(--panel-2); overflow: hidden; position: relative; }
+  #perclosFill { height: 100%; width: 0; background: var(--ok); transition: width .4s, background .2s; }
+  .tick { position: absolute; top: 0; bottom: 0; width: 2px; background: var(--bg); }
+  #earRow { font-size: 13px; color: var(--muted); margin-top: 8px; }
+
+  /* heart */
+  .bpm-row { display: flex; align-items: center; gap: 12px; margin: 4px 0 auto; }
+  #heartIcon { width: 38px; height: 38px; color: var(--alarm); flex-shrink: 0; }
+  #heartIcon.beat { animation: beat 1s infinite; }
+  @keyframes beat { 0%, 100% { transform: scale(1); } 15% { transform: scale(1.22); } 30% { transform: scale(1); } }
+  #bpm { font-size: 52px; font-weight: 700; font-variant-numeric: tabular-nums; line-height: 1; }
+  #bpm small { font-size: 17px; color: var(--muted); font-weight: 500; margin-left: 4px; }
+  #heartNote { font-size: 13px; color: var(--muted); margin-bottom: 6px; }
+  #spark { width: 100%; height: 46px; display: block; }
+
+  /* colors by level */
+  .lv-ok    #fatigueText { color: var(--ok); }
+  .lv-warn  #fatigueText { color: var(--warn); }
+  .lv-alarm #fatigueText { color: var(--alarm); }
+  .lv-calib #fatigueText { color: var(--calib); }
+  .lv-idle  #fatigueText { color: var(--muted); font-size: 24px; }
+  .card.lv-warn  { border-color: var(--warn); }
+  .card.lv-alarm { border-color: var(--alarm); }
+  #heartCard.hr-warn { border-color: var(--warn); }
+  #heartCard.hr-warn #heartNote { color: var(--warn); }
+</style>
+</head>
+<body>
+<div id="app">
+  <header>
+    <div id="title">Patient Monitor</div>
+    <div class="status">
+      <span><span class="dot" id="camDot"></span>Camera</span>
+      <span><span class="dot" id="heartDot"></span>Heart</span>
+      <span id="clock">--:--</span>
+    </div>
+  </header>
+
+  <main>
+    <div class="camera">
+      <img id="cam" alt="">
+      <div id="camOff">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M23 7l-7 5 7 5V7z"/><rect x="1" y="5" width="15" height="14" rx="2"/></svg>
+        <span id="camOffText">Waiting for camera…</span>
+      </div>
+      <div id="banner">
+        <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M10.3 3.9L1.8 18a2 2 0 001.7 3h17a2 2 0 001.7-3L13.7 3.9a2 2 0 00-3.4 0z"/><path d="M12 9v4M12 17h.01"/></svg>
+        <span id="bannerText">Check on patient</span>
+      </div>
+    </div>
+
+    <div class="side">
+      <div class="card lv-idle" id="fatigueCard">
+        <div class="card-head"><span class="label">Fatigue</span><span class="chip" id="patientChip">No patient</span></div>
+        <div id="fatigueText">Waiting…</div>
+        <div class="bar-row"><span>Eyes closed (last 60 s)</span><b id="perclos">--</b></div>
+        <div class="bar">
+          <div id="perclosFill"></div>
+          <div class="tick" style="left:30%"></div>   <!-- 15% = drowsy (bar scale 0-50%) -->
+          <div class="tick" style="left:60%"></div>   <!-- 30% = very drowsy -->
+        </div>
+        <div id="earRow">Eye openness: <span id="ear">--</span></div>
+      </div>
+
+      <div class="card" id="heartCard">
+        <div class="card-head"><span class="label">Heart rate</span></div>
+        <div class="bpm-row">
+          <svg id="heartIcon" viewBox="0 0 24 24" fill="currentColor"><path d="M12 21s-7.5-4.6-9.6-9.3C.9 8.3 3 4.5 6.7 4.5c2.2 0 3.6 1.2 4.3 2.3h2c.7-1.1 2.1-2.3 4.3-2.3 3.7 0 5.8 3.8 4.3 7.2C19.5 16.4 12 21 12 21z"/></svg>
+          <div id="bpm">--<small>BPM</small></div>
+        </div>
+        <div id="heartNote">Place finger on sensor</div>
+        <canvas id="spark" width="460" height="92"></canvas>
+      </div>
+    </div>
+  </main>
+</div>
+
+<script>
+/* ---------------- Settings ---------------- */
+const POLL_MS = 500;
+const BPM_LOW = 50, BPM_HIGH = 120;    // outside this range -> orange warning
+const PERCLOS_BAR_MAX = 0.5;           // bar is full at 50% eyes closed
+// Opening index.html directly as a file (e.g. on a laptop) runs a demo with fake data.
+const DEMO = location.protocol === "file:" || location.search.includes("demo");
+
+const $ = (s) => document.querySelector(s);
+
+/* Scale 800x480 to fit any window (exactly 1x on the real screen) */
+function fit() {
+  const s = Math.min(innerWidth / 800, innerHeight / 480);
+  $("#app").style.transform = `scale(${s})`;
+}
+addEventListener("resize", fit); fit();
+
+/* Clock */
+setInterval(tick, 1000); tick();
+function tick() {
+  $("#clock").textContent = new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+}
+
+/* ---------------- Camera ---------------- */
+let camLive = false;
+function setCamera(on) {
+  $("#camDot").classList.toggle("on", on);
+  if (DEMO) { $("#camOffText").textContent = "Demo mode — camera shows on the Pi"; return; }
+  if (on && !camLive) { $("#cam").src = "/video?t=" + Date.now(); }   // (re)connect stream
+  if (!on) { $("#cam").removeAttribute("src"); $("#camOffText").textContent = "Waiting for camera… (is live_yolo_v2.py running?)"; }
+  camLive = on;
+  $("#cam").style.visibility = on ? "visible" : "hidden";
+  $("#camOff").style.display = on ? "none" : "flex";
+}
+$("#cam").addEventListener("error", () => { camLive = false; });
+
+/* ---------------- Fatigue ---------------- */
+// Turns the status text from live_yolo_v2.py into a level + friendly text.
+function readFatigue(f) {
+  if (!f) return { level: "idle", text: "Monitor not running" };
+  const s = String(f.status || "").toUpperCase();
+  if (f.patient === false || s === "PAUSED") return { level: "idle", text: "No patient in view" };
+  if (s.startsWith("EYES CLOSED"))  return { level: "alarm", text: "Eyes closed" + (s.match(/\d+S/) ? " " + s.match(/\d+S/)[0].toLowerCase() : "") };
+  if (s.startsWith("VERY DROWSY"))  return { level: "alarm", text: "Very drowsy" };
+  if (s.startsWith("DROWSY"))       return { level: "warn",  text: "Drowsy" };
+  if (s.startsWith("CALIBRATING"))  return { level: "calib", text: "Calibrating…" };
+  if (s === "ALERT")                return { level: "ok",    text: "Awake" };
+  return { level: "idle", text: f.status || "No face" };
+}
+
+function showFatigue(f) {
+  const { level, text } = readFatigue(f);
+  const card = $("#fatigueCard");
+  card.className = "card lv-" + level;
+  $("#fatigueText").textContent = text;
+
+  const patient = !!(f && f.patient !== false && level !== "idle");
+  $("#patientChip").textContent = patient ? "Patient" : "No patient";
+  $("#patientChip").classList.toggle("on", patient);
+
+  const p = f && typeof f.perclos === "number" ? f.perclos : null;
+  $("#perclos").textContent = p === null ? "--" : Math.round(p * 100) + "%";
+  $("#perclosFill").style.width = p === null ? "0" : Math.min(100, (p / PERCLOS_BAR_MAX) * 100) + "%";
+  $("#perclosFill").style.background = p >= 0.30 ? "var(--alarm)" : p >= 0.15 ? "var(--warn)" : "var(--ok)";
+  $("#ear").textContent = f && typeof f.ear === "number" ? f.ear.toFixed(2) : "--";
+
+  $("#app").classList.toggle("alarm", level === "alarm");
+  $("#banner").classList.toggle("show", level === "alarm");
+  if (level === "alarm") $("#bannerText").textContent = text + " — check on patient";
+}
+
+/* ---------------- Heart ---------------- */
+function showHeart(h) {
+  $("#heartDot").classList.toggle("on", !!(h && h.connected));
+  const bpm = h && h.bpm;
+  const icon = $("#heartIcon");
+  if (bpm) {
+    $("#bpm").innerHTML = `${bpm}<small>BPM</small>`;
+    icon.classList.add("beat");
+    icon.style.animationDuration = (60 / Math.max(30, Math.min(200, bpm))).toFixed(2) + "s";
+  } else {
+    $("#bpm").innerHTML = `--<small>BPM</small>`;
+    icon.classList.remove("beat");
+  }
+  const out = bpm && (bpm < BPM_LOW || bpm > BPM_HIGH);
+  $("#heartCard").classList.toggle("hr-warn", !!out);
+  $("#heartNote").textContent =
+    !h || !h.connected ? "Heart sensor not connected" :
+    !bpm ? "Place finger on sensor" :
+    out ? (bpm < BPM_LOW ? "Low — check sensor / patient" : "High — check sensor / patient") :
+    "Normal range";
+  drawSpark(h ? h.history : []);
+}
+
+// Little BPM graph of the last 60 seconds
+function drawSpark(hist) {
+  const c = $("#spark"), g = c.getContext("2d"), W = c.width, H = c.height;
+  g.clearRect(0, 0, W, H);
+  const pts = (hist || []).filter(([t]) => t >= -60);
+  g.strokeStyle = "#262d37"; g.lineWidth = 2;
+  g.beginPath(); g.moveTo(0, H - 1); g.lineTo(W, H - 1); g.stroke();
+  if (pts.length < 2) return;
+  const bs = pts.map((p) => p[1]);
+  const lo = Math.min(...bs, 60) - 5, hi = Math.max(...bs, 100) + 5;
+  const x = (t) => ((t + 60) / 60) * W, y = (b) => H - 4 - ((b - lo) / (hi - lo)) * (H - 8);
+  g.strokeStyle = "#ff4d5e"; g.lineWidth = 4; g.lineJoin = "round";
+  g.beginPath();
+  pts.forEach(([t, b], i) => (i ? g.lineTo(x(t), y(b)) : g.moveTo(x(t), y(b))));
+  g.stroke();
+}
+
+/* ---------------- Data ---------------- */
+async function getStatus() {
+  if (DEMO) return demoStatus();
+  const r = await fetch("/api/status", { cache: "no-store" });
+  return r.json();
+}
+
+async function poll() {
+  try {
+    const s = await getStatus();
+    setCamera(!!s.camera);
+    showFatigue(s.fatigue);
+    showHeart(s.heart);
+  } catch {
+    setCamera(false);
+    showFatigue(null);
+    showHeart(null);
+    $("#fatigueText").textContent = "Server not running";
+  }
+}
+setInterval(poll, POLL_MS); poll();
+
+/* Fake data for previewing on a laptop */
+const demoHist = [];
+function demoStatus() {
+  const t = Date.now() / 1000;
+  const phase = Math.floor(t / 8) % 5;   // cycles through the states every 8 s
+  const fat = [
+    { status: "Alert", perclos: 0.05, ear: 0.29, patient: true },
+    { status: "DROWSY", perclos: 0.19, ear: 0.22, patient: true },
+    { status: "Alert", perclos: 0.08, ear: 0.28, patient: true },
+    { status: "EYES CLOSED 3s", perclos: 0.34, ear: 0.08, patient: true },
+    { status: "paused", patient: false },
+  ][phase];
+  const bpm = Math.round(72 + Math.sin(t / 6) * 6);
+  demoHist.push([t, bpm]);
+  while (demoHist.length && t - demoHist[0][0] > 60) demoHist.shift();
+  return {
+    camera: false,
+    fatigue: fat,
+    heart: { connected: true, bpm, history: demoHist.map(([ht, b]) => [ht - t, b]) },
+  };
+}
+</script>
+</body>
+</html>
